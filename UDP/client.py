@@ -3,12 +3,14 @@ import time
 
 buffer_size = 1024
 
+
 def create_udp_socket():
     global server_address
-    server_address = ("127.0.0.1", 2021)
+    server_address = ("192.168.1.13", 2021)
     # Create a UDP socket at client side
     global UDPClientSocket
     UDPClientSocket = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
+    UDPClientSocket.settimeout(1)
 
 
 def sendToServer(message):
@@ -22,19 +24,26 @@ def client_server_loop(message):
     # 1) send(msg|CRC)  --------------> check(msg|CRC)
     # 2) recv('ack')    <-------------- send('ack')
     sendToServer(message)
-    msgFromServer = UDPClientSocket.recvfrom(buffer_size)
-    if msgFromServer[0] == str.encode(message):
-        return 1
+    try:
+        msgFromServer = UDPClientSocket.recvfrom(buffer_size)
+        if msgFromServer[0] == str.encode(message):
+            return 1
+    except socket.timeout:
+        print("packet dropped")
+    
+    
     return 0
 
 
 if __name__ == '__main__':
     n = int(input("How many messages to send? "))
-    s = int(input("Size (in bytes) of each message? [1-180]"))
+    s = int(input("Size (in bytes) of each message? [1-180] "))
 
     success = 0
 
     create_udp_socket()
+
+    print("Created udp socket")
 
     for i in range(n):
         message = str(time.time()) * 10
