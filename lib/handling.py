@@ -1,4 +1,4 @@
-import crc
+from . import crc
 
 """
 A chat message is either a plain header, or header + "\r\n" + body
@@ -19,7 +19,7 @@ codes: client                 server
 buffer = 2050
 
 def encode(code, user='', meta='', body=''):
-    return f"{code} {user} {meta}\r\n{body}".encode()
+    return crc.chksum(f"{code} {user} {meta}\r\n{body}".encode())
 
 class Message(Exception):
     def __init__(self, name, body):
@@ -51,19 +51,39 @@ class Server(Exception):
 class Corrupted(Exception):
     pass
 
+
+
+
 class ServerHandler:
-    sessions = {"server": None}
+    sessions = dict()
 
-    def __init__(self, conn, addr):
-        self.conn = conn
-        self.addr = addr
+    def __init__(self, sock, client=None):
+        self.client = client
 
-    """We use raise here as a defer mechanism to jump around the stack, like in Golang"""
+        def sendtcp(data, addr):
+            assert addr, "Address must not be empty in sendtcp"
+            with sock.connect(addr) as client:
+                client.send(data)
+
+        if not client:
+            self.send = sock.sendto
+            daddr = sock.recvfrom(buffer)
+            assert len(daddr) == 2, "Didn't recv in init"
+            self.data, self.addr = daddr
+        else:
+            assert len(client) == 2, "client empty in init"
+            conn, self.addr = client
+            self.send = sendtcp
+            self.data = conn.recv(buffer)
+            conn.close()
+
+    """We use raise here as a defer mechanism, like in Golang but weaker"""
     def handle(self):
         try:
-            data = self.conn.recv(buffer).decode()
+            data = self.data[:-1].decode('latin1')
             header, body = data.split('\r\n')
             code, name, meta = header.split(' ')
+            code = int(code)
 
             if code == 10 or code == 12:
                 raise User(code, name)
@@ -72,66 +92,103 @@ class ServerHandler:
             else:
                 raise Server(40)
 
-        except User as exn:
-            user = str(exn)
+        except User as data:
+            user = str(data)
             sess = ServerHandler.sessions
             resp = 43
             if not user in sess:
-                sess[name] = self.conn
+                sess[name] = self.addr
                 resp = 23
-            self.conn.send(User(resp, name))
+            self.send(bytes(User(resp, name)), self.addr)
 
-        except Message as exn:
+        except Message as data:
+            data = bytes(data)
             sess = ServerHandler.sessions
-            for user, conn in list(sess.items()):
+            for user, addr in list(sess.items()):
                 # we create a copy by issuing list cast
                 try:
-                    conn.send(exn)
+                    assert addr, f"{user}: addr is empty in message loop"
+                    self.send(data, addr)
                 except BrokenPipeError:
                     del sess[user]
 
-        except Server:
+        except Server as data:
+            data = bytes(data)
             try:
-                self.conn.send(Server)
+                self.send(data, self.addr)
             except:
                 pass
 
         except Exception as e:
             print(e)
+            raise e
 
-        finally:
-            self.conn.close()
+class DefaultClient:
+    @staticmethod
+    def log(text):
+        print(text)
 
+    @staticmethod
+    def display(text):
+        print(text)
+
+    @staticmethod
+    def prompt(text):
+        return input(text)
 
 class ClientHandler:
+    username = None
 
-    def __init__(self, conn, addr):
-        self.conn = conn
-        self.addr = addr
+    def __init__(self, sock, server=None, interface=DefaultClient):
+        self.server = server
+        self.ifc = interface
+
+        if not server:
+            self.data, self.addr = sock.recvfrom(buffer)
+        else:
+            conn, self.addr = server
+            self.data = conn.recv(buffer)
+            conn.close()
 
     def handle(self):
-        data = self.conn.recv(buffer)
-        if not crc.verify(data):
-            raise Corrupted
+        try:
+            data = self.data
+            if not crc.verify(data):
+                raise Corrupted
 
-        data = data.decode()
-        header, body = data.split('\r\n')
-        code, name, meta = header.split(' ')
+            data = data.decode('latin1')
+            header, body = data.split('\r\n')
+            code, name, meta = header.split(' ')
+            code = int(code)
 
 
-        if code == 20:
-            print(f"{name}: {body}")
-        elif code == 23:
-            print(f"registered as {name}")
-            raise User(23, name)
-        elif code == 43:
-            print(f"username {name} is taken")
-            raise User(43, name)
-        elif code in {40, 50, 53}:
-            print(f"{name}: {meta}")
-            if code == 53:
-                raise ConnectionError
+            if code == 20:
+                raise Message(name, body)
+            elif code == 23 or code == 43:
+                raise User(code, name)
+            elif code in {40, 50, 53}:
+                if code == 53:
+                    raise ConnectionError
+                raise Server(code)
 
-    def __del__(self):
-        self.conn.close()
+        except Message as data:
+            data = bytes(data)
+            self.ifc.display(data.decode('latin1'))
+
+        except User as data:
+            if code == 23:
+                ClientHandler.username = name
+            else:
+                self.ifc.display(f"Username {name} Taken.")
+                ClientHandler.username = self.ifc.prompt("Enter another username: ")
+
+        except Server as data:
+            data = bytes(data)
+            self.ifc.log(data.decode('latin1'))
+
+        except ConnectionError:
+            self.ifc.log("ConnectionError")
+
+        except Corrupted:
+            self.ifc.log("Corrupted message")
 

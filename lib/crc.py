@@ -1,7 +1,8 @@
+from os import path
 from ctypes import cdll, create_string_buffer,\
         c_char_p, c_size_t, c_bool, c_byte
 
-_ldpath = "./libcrc.so"
+_ldpath = path.join("lib", "stubs", "libcrc.so")
 _libcrc = cdll.LoadLibrary(_ldpath)
 
 # byte lookup(byte message[static 1], word len);
@@ -30,16 +31,3 @@ def chksum(s: bytes) -> bytes:
 def verify(s: bytes) -> bool:
     return _verify(s, len(s))
 
-if __name__ == "__main__":
-    data = b"10011101" #data to be sent
-    mesg = chksum(data)
-
-    print("Message:   %s" % data)
-    print("After CRC: %s" % mesg)
-
-    corrupt_data = mesg.replace(b'0',b'',1) #data received
-
-    print("Corrupted: %s" % corrupt_data)
-    print("Verification:", verify(corrupt_data) == False
-     and "Bad transmission as expected."
-     or  "Something unexpected happened, verify returns True.")
