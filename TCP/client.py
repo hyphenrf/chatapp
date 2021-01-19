@@ -1,45 +1,43 @@
 import socket
-from getpass import getpass
-
-myname = input("username: ")
-mypass = getpass("password? [hit enter to login without password] ")
-
-recipient = ""
+import sys
 
 def connect(addr=None, port=None):
     s = socket
-    inet = addr or '0.0.0.0'
-    port = port or 2021
-    addr = inet, port
-    client = s.socket(s.AF_INET, s.SOCK_STREAM | s.SOCK_NONBLOCK)
-    client.connect(addr)
+    global server
+    server = (addr or '0.0.0.0'), (port or 2021)
+    client = s.socket(s.AF_INET, s.SOCK_STREAM)
+    client.connect(server)
     return client
 
-def recv_loop(client):
-    while True:
-        data = client.recv(2050).decode()
-        header, body = data.split('\r\n')
-        code, user, meta = header.split(' ')
-        code = int(code)
-        if code == 20:
-            body and print(body)
-
-def send_loop(client):
-    while True:
-        header = f"20 {myname} "
-        message = input(myname + "> ")
-        data = header + "\r\n" + message
-        client.send(data.encode())
-
-while __name__ == '__main__':
-    try:
-        with connect() as client:
-            tx = Thread(target=send_loop, args=client)
-            rx = Thread(target=recv_loop, args=client)
-            break
-    except:
-        continue
-
 if __name__ == '__main__':
-    rx.join()
-    tx.join()
+    with connect() as client:
+        try:
+            while 1:
+                myname = input("username: ")
+                client.send(f"10 {myname} \r\n".encode())
+                reply = client.recv(2050).decode()
+                while not reply:
+                    print("waiting reply")
+                    reply = client.recv(2050).decode()
+                if reply[0] == '2':
+                    print("username ok.")
+                    break
+                if reply[0] == '5':
+                    raise ConnectionError
+                if reply[0] == '4':
+                    print("username taken.")
+
+            while 1:
+                cmd = input("> ")
+                client.send(f"20 {myname} \r\n{cmd}".encode())
+                reply = client.recv(2050).decode()
+                if reply[0] == '2':
+                    header, message = reply.split("\r\n")
+                    _, sender, _ = header.split(" ")
+                    print(f"{sender}: {message}")
+
+        except ConnectionError:
+            print('server unavailable.')
+        except Exception as e:
+            print(e)
+            pass
