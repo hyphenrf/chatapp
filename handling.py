@@ -1,3 +1,5 @@
+import crc
+
 """
 A chat message is either a plain header, or header + "\r\n" + body
 a header is code<space>user<space>meta, 1024 bytes max
@@ -45,6 +47,9 @@ class Server(Exception):
         return encode(self.code, "server", responses[self.code])
     def __eq__(self, other):
         type(self) == type(other)
+
+class Corrupted(Exception):
+    pass
 
 class ServerHandler:
     sessions = {"server": None}
@@ -105,7 +110,11 @@ class ClientHandler:
         self.addr = addr
 
     def handle(self):
-        data = self.conn.recv(buffer).decode()
+        data = self.conn.recv(buffer)
+        if not crc.verify(data):
+            raise Corrupted
+
+        data = data.decode()
         header, body = data.split('\r\n')
         code, name, meta = header.split(' ')
 
